@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>贪吃蛇 - SANDS AAA</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #1a1a1a;
+            font-family: Arial, sans-serif;
+            color: white;
+            overflow: hidden;
+            touch-action: none;
+        }
+        
+        #gameContainer {
+            position: relative;
+            width: min(90vw, 90vh);
+            height: min(90vw, 90vh);
+            max-width: 600px;
+            max-height: 600px;
+        }
+
+        canvas {
+            border: 2px solid #4CAF50;
+            background-color: #000;
+            width: 100%;
+            height: 100%;
+        }
+
+        #gameInfo {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: min(20px, 5vw);
+        }
+
+        #startScreen, #gameOverScreen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            background-color: rgba(0, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+            width: 80%;
+        }
+
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 15px 32px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: min(16px, 4vw);
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+
+        button:hover {
+            background-color: #45a049;
+        }
+
+        .signature {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            font-size: min(14px, 3.5vw);
+            color: #666;
+        }
+
+        #soundToggle {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            cursor: pointer;
+            font-size: min(24px, 6vw);
+            color: #4CAF50;
+            z-index: 100;
+        }
+
+        #mobileControls {
+            display: none;
+            position: fixed;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 150px;
+            height: 150px;
+        }
+
+        .control-btn {
+            position: absolute;
+            width: 40px;
+            height: 40px;
+            background-color: rgba(76, 175, 80, 0.5);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #upBtn { top: 0; left: 55px; }
+        #leftBtn { top: 55px; left: 0; }
+        #rightBtn { top: 55px; right: 0; }
+        #downBtn { bottom: 0; left: 55px; }
+
+        @media (max-width: 768px) {
+            #mobileControls {
+                display: block;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="gameInfo">
+            等级: <span id="level">1</span><br>
+            得分: <span id="score">0</span>
+        </div>
+        <div id="soundToggle" onclick="toggleSound()">🔊</div>
+        <div id="startScreen">
+            <h2>贪吃蛇</h2>
+            <p>使用方向键或触摸控制移动</p>
+            <button onclick="startGame()">开始游戏</button>
+        </div>
+        <div id="gameOverScreen">
+            <h2>游戏结束</h2>
+            <p>得分: <span id="finalScore">0</span></p>
+            <p>等级: <span id="finalLevel">1</span></p>
+            <button onclick="startGame()">再玩一次</button>
+        </div>
+    </div>
+    <div id="mobileControls">
+        <div class="control-btn" id="upBtn">↑</div>
+        <div class="control-btn" id="leftBtn">←</div>
+        <div class="control-btn" id="rightBtn">→</div>
+        <div class="control-btn" id="downBtn">↓</div>
+    </div>
+    <div class="signature">Powered by SANDS AAA@2025</div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size based on container
+        function resizeCanvas() {
+            const container = document.getElementById('gameContainer');
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        const gridSize = 20;
+        const getTileCount = () => Math.floor(canvas.width / gridSize);
+
+        let snake = [];
+        let food = {};
+        let direction = 'right';
+        let score = 0;
+        let level = 1;
+        let gameSpeed = 150;
+        let gameLoop;
+        let gameStarted = false;
+        let soundEnabled = true;
+        let audioContext = null;
+
+        // Initialize audio context on first user interaction
+        function initAudio() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+        }
+
+        // Function to create a beep sound
+        function createBeepSound(frequency, duration, type = 'sine') {
+            if (!audioContext) return { play: () => {} };
+            
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.type = type;
+            oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
+            
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            return {
+                play: () => {
+                    try {
+                        oscillator.start();
+                        oscillator.stop(audioContext.currentTime + duration);
+                    } catch (e) {
+                        console.warn('Audio playback failed:', e);
+                    }
+                }
+            };
+        }
+
+        // Create game sounds
+        const eatSound = () => createBeepSound(880, 0.1, 'sine');
+        const gameOverSound = () => {
+            const sound1 = createBeepSound(440, 0.3, 'sawtooth');
+            const sound2 = createBeepSound(220, 0.3, 'sawtooth');
+            return {
+                play: () => {
+                    sound1.play();
+                    setTimeout(() => sound2.play(), 200);
+                }
+            };
+        };
+
+        // Toggle sound
+        function toggleSound() {
+            initAudio();
+            soundEnabled = !soundEnabled;
+            document.getElementById('soundToggle').textContent = soundEnabled ? '🔊' : '🔈';
+        }
+
+        // Initialize game
+        function initGame() {
+            snake = [
+                { x: 5, y: 5 },
+                { x: 4, y: 5 },
+                { x: 3, y: 5 }
+            ];
+            direction = 'right';
+            score = 0;
+            level = 1;
+            gameSpeed = 150;
+            updateScore();
+            updateLevel();
+            spawnFood();
+        }
+
+        // Start game
+        function startGame() {
+            initAudio();
+            if (gameLoop) clearInterval(gameLoop);
+            initGame();
+            document.getElementById('startScreen').style.display = 'none';
+            document.getElementById('gameOverScreen').style.display = 'none';
+            gameStarted = true;
+            gameLoop = setInterval(updateGame, gameSpeed);
+        }
+
+        // Spawn food at random position
+        function spawnFood() {
+            const tileCount = getTileCount();
+            food = {
+                x: Math.floor(Math.random() * tileCount),
+                y: Math.floor(Math.random() * tileCount)
+            };
+            // Make sure food doesn't spawn on snake
+            for (let segment of snake) {
+                if (segment.x === food.x && segment.y === food.y) {
+                    spawnFood();
+                    break;
+                }
+            }
+        }
+
+        // Update game state
+        function updateGame() {
+            const tileCount = getTileCount();
+            const head = { x: snake[0].x, y: snake[0].y };
+
+            switch (direction) {
+                case 'up': head.y--; break;
+                case 'down': head.y++; break;
+                case 'left': head.x--; break;
+                case 'right': head.x++; break;
+            }
+
+            // Check wall collision
+            if (head.x < 0 || head.x >= tileCount || head.y < 0 || head.y >= tileCount) {
+                gameOver();
+                return;
+            }
+
+            // Check self collision
+            for (let segment of snake) {
+                if (head.x === segment.x && head.y === segment.y) {
+                    gameOver();
+                    return;
+                }
+            }
+
+            // Check food collision
+            if (head.x === food.x && head.y === food.y) {
+                if (soundEnabled) eatSound().play();
+                score += level * 10;
+                updateScore();
+                spawnFood();
+                
+                // Level up every 100 points
+                if (score > 0 && score % 100 === 0) {
+                    levelUp();
+                }
+            } else {
+                snake.pop();
+            }
+
+            snake.unshift(head);
+            draw();
+        }
+
+        // Level up
+        function levelUp() {
+            level++;
+            updateLevel();
+            gameSpeed = Math.max(50, 150 - (level - 1) * 10);
+            clearInterval(gameLoop);
+            gameLoop = setInterval(updateGame, gameSpeed);
+        }
+
+        // Game over
+        function gameOver() {
+            gameStarted = false;
+            if (soundEnabled) {
+                gameOverSound().play();
+            }
+            clearInterval(gameLoop);
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('finalLevel').textContent = level;
+            document.getElementById('gameOverScreen').style.display = 'block';
+        }
+
+        // Update score display
+        function updateScore() {
+            document.getElementById('score').textContent = score;
+        }
+
+        // Update level display
+        function updateLevel() {
+            document.getElementById('level').textContent = level;
+        }
+
+        // Draw game state
+        function draw() {
+            const tileCount = getTileCount();
+            const actualGridSize = canvas.width / tileCount;
+
+            // Clear canvas
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw snake
+            ctx.fillStyle = '#4CAF50';
+            for (let segment of snake) {
+                ctx.fillRect(
+                    segment.x * actualGridSize,
+                    segment.y * actualGridSize,
+                    actualGridSize - 2,
+                    actualGridSize - 2
+                );
+            }
+
+            // Draw food
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(
+                food.x * actualGridSize,
+                food.y * actualGridSize,
+                actualGridSize - 2,
+                actualGridSize - 2
+            );
+        }
+
+        // Handle keyboard input
+        document.addEventListener('keydown', (event) => {
+            if (!gameStarted) {
+                if (event.key === 'Enter') startGame();
+                return;
+            }
+
+            switch (event.key) {
+                case 'ArrowUp':
+                    if (direction !== 'down') direction = 'up';
+                    break;
+                case 'ArrowDown':
+                    if (direction !== 'up') direction = 'down';
+                    break;
+                case 'ArrowLeft':
+                    if (direction !== 'right') direction = 'left';
+                    break;
+                case 'ArrowRight':
+                    if (direction !== 'left') direction = 'right';
+                    break;
+            }
+        });
+
+        // Mobile controls
+        function setupMobileControls() {
+            const controls = {
+                'upBtn': 'up',
+                'downBtn': 'down',
+                'leftBtn': 'left',
+                'rightBtn': 'right'
+            };
+
+            for (let [btnId, dir] of Object.entries(controls)) {
+                const btn = document.getElementById(btnId);
+                
+                btn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    if (gameStarted && direction !== oppositeDirection(dir)) {
+                        direction = dir;
+                    }
+                });
+            }
+        }
+
+        function oppositeDirection(dir) {
+            const opposites = {
+                'up': 'down',
+                'down': 'up',
+                'left': 'right',
+                'right': 'left'
+            };
+            return opposites[dir];
+        }
+
+        setupMobileControls();
+
+        // Show start screen initially
+        document.getElementById('startScreen').style.display = 'block';
+
+        // Prevent default touch behavior
+        document.addEventListener('touchstart', (e) => {
+            if (e.target.className === 'control-btn') {
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        // Initialize audio on first click/touch
+        document.addEventListener('click', initAudio, { once: true });
+        document.addEventListener('touchstart', initAudio, { once: true });
+    </script>
+</body>
+</html>
